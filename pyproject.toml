@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rogue-llm"
+version = "0.1.0"
+description = "Adversarial LLM proxy for testing whether agent security is structural or behavioral"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{name = "Samuel Rojas", email = "samuelitemaster@gmail.com"}]
+keywords = ["llm", "security", "agent", "red-team", "adversarial", "structural-security"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+
+[project.scripts]
+rogue-llm = "roguellm.cli:main"
+
+[project.urls]
+Repository = "https://github.com/samuelrojas-dev/rogue-llm"
+
+[tool.setuptools.packages.find]
+where = ["src"]
