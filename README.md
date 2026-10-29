@@ -89,6 +89,55 @@ Already have a transcript? Scan it for leaked secrets:
 rogue-llm scan transcript.txt --secrets secrets.json
 ```
 
+## Diff mode — cross-framework parser differential testing
+
+**No other tool does this.** Send the same malformed tool-call response to multiple agent frameworks and compare what each one actually executes. Every divergence is a potential security bug.
+
+```bash
+# Install frameworks to compare
+pip install openai langchain-core litellm
+
+# Run differential testing
+rogue-llm diff
+
+# Filter by category
+rogue-llm diff --category duplicate-keys
+
+# JSON output for CI
+rogue-llm diff --json -o report.json
+
+# List available adapters and cases
+rogue-llm diff --list-adapters
+rogue-llm diff --list-cases
+```
+
+### What it tests
+
+17 crafted malformed responses across 7 categories:
+
+| Category | What it probes | Known bugs |
+|----------|----------------|------------|
+| **duplicate-keys** | `"name":"safe","name":"dangerous"` — first vs last wins | vLLM#48864, ATR-2026-02350 |
+| **type-confusion** | args as object, double-encoded, empty, truncated | langchain-litellm#249 |
+| **conflicting-ids** | Same tool_call id or index for different tools | — |
+| **finish-reason** | `stop` with tool_calls, `tool_calls` without them | — |
+| **content-injection** | Tool-call JSON in the text content field | — |
+| **homoglyphs** | Cyrillic `е` in tool name, zero-width characters | — |
+| **schema-violation** | Extra fields (`bypass_auth`), missing `name` | — |
+| **batch-drop** | One bad call silently drops valid siblings | LangChain#35782 |
+
+### Adapters
+
+| Adapter | Framework | Auto-detected |
+|---------|-----------|---------------|
+| `stdlib` | Python json.loads (baseline) | Always |
+| `openai` | OpenAI SDK (Pydantic validation) | `pip install openai` |
+| `langchain` | LangChain AIMessage conversion | `pip install langchain-core` |
+| `litellm` | LiteLLM ModelResponse | `pip install litellm` |
+| `pydantic-ai` | Pydantic AI (via OpenAI types) | `pip install pydantic-ai` |
+
+Exit code 1 if security-relevant divergences are found — plug it into CI.
+
 ## Endpoints
 
 | Endpoint | Method | Description |
