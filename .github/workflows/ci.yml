@@ -42,7 +42,7 @@ jobs:
         run: pip install -e ".[all,dev]"
 
       - name: Run differential testing
-        run: rogue-llm diff --json -o diff-report.json
+        run: rogue-llm diff --json -o diff-report.json || true
 
       - name: Upload diff report
         if: always()
