@@ -1,6 +1,6 @@
 # rogue-llm
 
-[![PyPI version](https://img.shields.io/pypi/v/rogue-llm.svg)](https://pypi.org/project/rogue-llm/)
+[![PyPI version](https://img.shields.io/pypi/v/rogue-llm.svg?v=0.3.0)](https://pypi.org/project/rogue-llm/)
 [![CI](https://github.com/samuelrojas-dev/rogue-llm/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelrojas-dev/rogue-llm/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
