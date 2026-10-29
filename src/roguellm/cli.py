@@ -264,6 +264,32 @@ def main():
         help="Minimum passing score (0-100). Exit code 1 if below (default: 0)",
     )
 
+    # benchmark
+    bench = sub.add_parser(
+        "benchmark",
+        help="Run the security benchmark across standard agent scenarios",
+    )
+    bench.add_argument(
+        "--profiles", "-p",
+        help="Comma-separated profiles to run (default: all)",
+    )
+    bench.add_argument(
+        "--scenarios", "-s",
+        help="Comma-separated scenario IDs (default: all)",
+    )
+    bench.add_argument(
+        "--output", "-o",
+        help="Save JSON report to file",
+    )
+    bench.add_argument(
+        "--badge",
+        help="Save SVG badge to file",
+    )
+    bench.add_argument(
+        "--badge-label", default="security",
+        help="Badge label text (default: 'security')",
+    )
+
     args = parser.parse_args()
     if args.subcommand == "serve":
         cmd_serve(args)
@@ -275,6 +301,8 @@ def main():
         cmd_scan_agent(args)
     elif args.subcommand == "mcp-audit":
         cmd_mcp_audit(args)
+    elif args.subcommand == "benchmark":
+        cmd_benchmark(args)
 
 
 def cmd_scan_agent(args):
@@ -392,6 +420,61 @@ def _print_scan_results(results):
         if pr.leaks:
             for leak in pr.leaks:
                 print(f"    └─ {leak['secret']!r} via {leak['technique']}")
+
+
+def cmd_benchmark(args):
+    """Run the security benchmark across standard agent scenarios."""
+    from .hostile import AttackProfile, ALL_PROFILES
+    from .benchmark import SecurityBenchmark, SCENARIOS
+
+    # Parse profiles
+    if args.profiles:
+        profile_names = [p.strip().upper() for p in args.profiles.split(",")]
+        try:
+            profiles = [AttackProfile[n] for n in profile_names]
+        except KeyError as e:
+            valid = ", ".join(p.name.lower() for p in AttackProfile)
+            print(f"Error: unknown profile {e}. Valid: {valid}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        profiles = ALL_PROFILES
+
+    # Parse scenarios
+    if args.scenarios:
+        scenario_ids = [s.strip() for s in args.scenarios.split(",")]
+        scenarios = [s for s in SCENARIOS if s.id in scenario_ids]
+        if not scenarios:
+            valid = ", ".join(s.id for s in SCENARIOS)
+            print(f"Error: no matching scenarios. Valid: {valid}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        scenarios = SCENARIOS
+
+    print(f"""
+\033[91m╔══════════════════════════════════════════════════════════════╗
+║                    rogue-llm v0.3.0                          ║
+║                 Security Benchmark                           ║
+╚══════════════════════════════════════════════════════════════╝\033[0m
+
+  Scenarios: \033[1m{len(scenarios)}\033[0m
+  Profiles per scenario: \033[1m{len(profiles)}\033[0m
+""")
+
+    def on_scenario(scenario):
+        print(f"  \033[1m▶ {scenario.name}\033[0m — {scenario.description[:60]}...")
+
+    bench = SecurityBenchmark(profiles=profiles, scenarios=scenarios)
+    results = bench.run(on_scenario=on_scenario)
+
+    print()
+    print(results.summary())
+
+    if args.output:
+        results.save_json(args.output)
+        print(f"\n  JSON report saved to {args.output}")
+    if args.badge:
+        results.save_badge(args.badge, label=args.badge_label)
+        print(f"  Badge saved to {args.badge}")
 
 
 def cmd_mcp_audit(args):
