@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rogue-llm"
-version = "0.2.0"
+version = "0.3.0"
 description = "Adversarial LLM proxy for testing whether agent security is structural or behavioral"
 readme = "README.md"
 license = "MIT"

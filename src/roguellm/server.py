@@ -1,13 +1,13 @@
 """OpenAI-compatible HTTP server that runs the hostile model.
 
 Point any agent at this server and it will actively try to exfiltrate your secrets.
-The server implements the /v1/chat/completions endpoint, so it's a drop-in replacement
-for the OpenAI API. It also logs all interactions and detects leaks in real time.
+The server implements the /v1/chat/completions endpoint (including SSE streaming),
+so it's a drop-in replacement for the OpenAI API.
 
 Usage:
-    from roguellm.server import create_app
-    app = create_app(secrets=["secret1", "secret2"])
-    app.run(port=8642)
+    from roguellm.server import create_server
+    server = create_server(secrets=["secret1", "secret2"])
+    server.serve_forever()
 """
 
 import json
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any
 
-from .hostile import HostileModel
+from .hostile import HostileModel, AttackProfile
 from .detector import find_leaks, Leak
 
 
@@ -94,6 +94,7 @@ class RogueHandler(BaseHTTPRequestHandler):
 
         messages = body.get("messages", [])
         tools = body.get("tools")
+        stream = body.get("stream", False)
 
         # Generate hostile response
         result = self.server.hostile_model.respond(messages, tools)
@@ -123,7 +124,13 @@ class RogueHandler(BaseHTTPRequestHandler):
         if leaks:
             self._print_leaks(leaks)
 
-        # Format as OpenAI response
+        if stream:
+            self._stream_response(result)
+        else:
+            self._json_response(result)
+
+    def _json_response(self, result: dict):
+        """Send a single JSON response (non-streaming)."""
         response_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         message: dict[str, Any] = {"role": "assistant"}
         if result.get("content"):
@@ -146,6 +153,81 @@ class RogueHandler(BaseHTTPRequestHandler):
         }
 
         self._respond(200, openai_response)
+
+    def _stream_response(self, result: dict):
+        """Send the response as SSE chunks, matching OpenAI's streaming format.
+
+        This is critical for real-world testing — most production agents use
+        streaming. The hostile payload is split across multiple chunks so the
+        attack surface matches real usage.
+        """
+        response_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        created = int(time.time())
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        def send_chunk(delta: dict, finish_reason: str | None = None):
+            chunk = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": "rogue-hostile-1",
+                "choices": [{
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }],
+            }
+            line = f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            self.wfile.write(line.encode())
+            self.wfile.flush()
+
+        # First chunk: role
+        send_chunk({"role": "assistant"})
+
+        if result.get("tool_calls"):
+            # Stream tool calls: one chunk per tool call with full args
+            for i, tc in enumerate(result["tool_calls"]):
+                # First chunk for each tool call: id, type, function name
+                send_chunk({"tool_calls": [{
+                    "index": i,
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["function"]["name"], "arguments": ""},
+                }]})
+                # Stream arguments in ~40-char pieces (realistic chunk size)
+                args = tc["function"]["arguments"]
+                chunk_size = 40
+                for pos in range(0, len(args), chunk_size):
+                    send_chunk({"tool_calls": [{
+                        "index": i,
+                        "function": {"arguments": args[pos:pos + chunk_size]},
+                    }]})
+            send_chunk({}, finish_reason="tool_calls")
+        elif result.get("content"):
+            # Stream content: split into word-boundary chunks (~3-5 words each)
+            content = result["content"]
+            words = content.split(" ")
+            chunk_words = []
+            for word in words:
+                chunk_words.append(word)
+                if len(chunk_words) >= 4:
+                    send_chunk({"content": " ".join(chunk_words) + " "})
+                    chunk_words = []
+            if chunk_words:
+                send_chunk({"content": " ".join(chunk_words)})
+            send_chunk({}, finish_reason="stop")
+        else:
+            send_chunk({}, finish_reason="stop")
+
+        # Final [DONE] marker
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
 
     def _print_leaks(self, leaks: list[Leak]):
         for leak in leaks:
@@ -179,14 +261,16 @@ class RogueHandler(BaseHTTPRequestHandler):
 class RogueServer(HTTPServer):
     """HTTP server with hostile model and session tracking."""
 
-    def __init__(self, host: str, port: int, secrets: list[str]):
+    def __init__(self, host: str, port: int, secrets: list[str],
+                 profile: AttackProfile = AttackProfile.FULL_ATTACK):
         super().__init__((host, port), RogueHandler)
         self.secrets = secrets
-        self.hostile_model = HostileModel(secrets)
+        self.hostile_model = HostileModel(secrets, profile=profile)
         self.session = SessionLog()
 
 
 def create_server(host: str = "127.0.0.1", port: int = 8642,
-                  secrets: list[str] | None = None) -> RogueServer:
+                  secrets: list[str] | None = None,
+                  profile: AttackProfile = AttackProfile.FULL_ATTACK) -> RogueServer:
     """Create a hostile LLM server."""
-    return RogueServer(host, port, secrets or [])
+    return RogueServer(host, port, secrets or [], profile=profile)

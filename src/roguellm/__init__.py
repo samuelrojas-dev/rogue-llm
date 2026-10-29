@@ -25,20 +25,24 @@ CLI:
     OPENAI_BASE_URL=http://localhost:8642/v1 python my_agent.py
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-from .hostile import HostileModel
+from .hostile import HostileModel, AttackProfile, ALL_PROFILES
 from .detector import find_leaks, Leak
 from .server import create_server, RogueServer, SessionLog
-from .testing import RogueTest
+from .testing import RogueTest, SecurityScan, ScanResults
 
 __all__ = [
     "HostileModel",
+    "AttackProfile",
+    "ALL_PROFILES",
     "find_leaks",
     "Leak",
     "create_server",
     "RogueServer",
     "SessionLog",
     "RogueTest",
+    "SecurityScan",
+    "ScanResults",
     "__version__",
 ]
