@@ -1,4 +1,4 @@
-# rogue-llm
+ rogue-llm
 
 **Adversarial LLM proxy for testing structural vs behavioral agent security.**
 
