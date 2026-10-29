@@ -24,9 +24,9 @@ class LiteLLMAdapter(Adapter):
     @property
     def version(self) -> str:
         try:
-            import litellm
-            return litellm.__version__
-        except (ImportError, AttributeError):
+            from importlib.metadata import version
+            return version("litellm")
+        except Exception:
             return "not installed"
 
     def parse(self, raw_json: str) -> ParseResult:
