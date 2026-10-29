@@ -25,7 +25,7 @@ def cmd_serve(args):
     server = create_server(host=args.host, port=args.port, secrets=secrets)
     print(f"""
 \033[91m╔══════════════════════════════════════════════════════════════╗
-║                    rogue-llm v0.1.0                          ║
+║                    rogue-llm v0.2.0                          ║
 ║            Adversarial LLM for Structural Security           ║
 ╚══════════════════════════════════════════════════════════════╝\033[0m
 

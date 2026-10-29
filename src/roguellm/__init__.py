@@ -8,14 +8,37 @@ If your agent leaks data through a rogue model, your security is *behavioral* â€
 on the model cooperating. If it blocks the leak, your security is *structural* â€” the
 architecture prevents exfiltration regardless of model behavior.
 
-Usage:
-    # 1. Start the hostile server
+Quick start (Python API):
+
+    from roguellm import RogueTest
+
+    test = RogueTest(secrets=["cost_27315", "margin_71.8", "SUP-8842"])
+    with test.start() as server:
+        # Point your agent at server.base_url
+        run_my_agent(base_url=server.base_url)
+    # Check the result
+    assert test.verdict == "STRUCTURAL", test.report()
+
+CLI:
+
     rogue-llm serve --secrets secrets.json --port 8642
-
-    # 2. Point your agent at it (change OPENAI_BASE_URL)
     OPENAI_BASE_URL=http://localhost:8642/v1 python my_agent.py
-
-    # 3. The server logs all attempts and detects leaks in real time
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
+
+from .hostile import HostileModel
+from .detector import find_leaks, Leak
+from .server import create_server, RogueServer, SessionLog
+from .testing import RogueTest
+
+__all__ = [
+    "HostileModel",
+    "find_leaks",
+    "Leak",
+    "create_server",
+    "RogueServer",
+    "SessionLog",
+    "RogueTest",
+    "__version__",
+]
