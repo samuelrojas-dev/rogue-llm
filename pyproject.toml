@@ -10,19 +10,43 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{name = "Samuel Rojas", email = "samuelitemaster@gmail.com"}]
-keywords = ["llm", "security", "agent", "red-team", "adversarial", "structural-security"]
+keywords = [
+    "llm", "security", "agent", "red-team", "adversarial",
+    "structural-security", "tool-call", "differential-testing",
+    "prompt-injection", "ai-safety",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+langchain = ["langchain-core>=0.2"]
+litellm = ["litellm>=1.0"]
+pydantic-ai = ["pydantic-ai>=2.0"]
+all = ["openai>=1.0", "langchain-core>=0.2", "litellm>=1.0", "pydantic-ai>=2.0"]
+dev = ["pytest>=7.0", "build", "twine"]
 
 [project.scripts]
 rogue-llm = "roguellm.cli:main"
 
 [project.urls]
+Homepage = "https://github.com/samuelrojas-dev/rogue-llm"
 Repository = "https://github.com/samuelrojas-dev/rogue-llm"
+Issues = "https://github.com/samuelrojas-dev/rogue-llm/issues"
+Documentation = "https://github.com/samuelrojas-dev/rogue-llm#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

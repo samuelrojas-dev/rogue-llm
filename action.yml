@@ -1,0 +1,111 @@
+name: "rogue-llm Security Test"
+description: "Test whether your AI agent's security is structural or behavioral using a hostile model proxy"
+author: "Samuel Rojas"
+
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  mode:
+    description: "Test mode: 'diff' for parser differential testing, 'scan' for transcript scanning"
+    required: false
+    default: "diff"
+  secrets-file:
+    description: "Path to secrets JSON file (for scan mode)"
+    required: false
+  transcript:
+    description: "Path to transcript file (for scan mode)"
+    required: false
+  category:
+    description: "Filter diff cases by category (e.g., duplicate-keys, type-confusion)"
+    required: false
+  frameworks:
+    description: "Space-separated list of extra frameworks to install (e.g., 'openai langchain-core litellm')"
+    required: false
+    default: "openai langchain-core litellm"
+  python-version:
+    description: "Python version to use"
+    required: false
+    default: "3.12"
+  fail-on-divergence:
+    description: "Fail the action if security-relevant divergences are found"
+    required: false
+    default: "true"
+
+outputs:
+  divergences:
+    description: "Total number of divergences found"
+    value: ${{ steps.run.outputs.divergences }}
+  security-divergences:
+    description: "Number of security-relevant divergences"
+    value: ${{ steps.run.outputs.security_divergences }}
+  report:
+    description: "Path to the JSON report file"
+    value: ${{ steps.run.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install rogue-llm
+      shell: bash
+      run: |
+        pip install rogue-llm
+        if [ -n "${{ inputs.frameworks }}" ]; then
+          pip install ${{ inputs.frameworks }}
+        fi
+
+    - name: Run rogue-llm
+      id: run
+      shell: bash
+      env:
+        ROGUE_MODE: ${{ inputs.mode }}
+        ROGUE_SECRETS: ${{ inputs.secrets-file }}
+        ROGUE_TRANSCRIPT: ${{ inputs.transcript }}
+        ROGUE_CATEGORY: ${{ inputs.category }}
+        ROGUE_FAIL: ${{ inputs.fail-on-divergence }}
+      run: |
+        REPORT_PATH="${GITHUB_WORKSPACE}/rogue-llm-report.json"
+
+        if [ "$ROGUE_MODE" = "diff" ]; then
+          ARGS="diff --json -o $REPORT_PATH"
+          if [ -n "$ROGUE_CATEGORY" ]; then
+            ARGS="$ARGS --category $ROGUE_CATEGORY"
+          fi
+
+          # Run diff — capture exit code
+          set +e
+          rogue-llm $ARGS
+          EXIT_CODE=$?
+          set -e
+
+          # Parse results from JSON report
+          if [ -f "$REPORT_PATH" ]; then
+            DIVS=$(python -c "import json; d=json.load(open('$REPORT_PATH')); print(d.get('total_divergences', 0))")
+            SEC_DIVS=$(python -c "import json; d=json.load(open('$REPORT_PATH')); print(d.get('security_divergences', 0))")
+          else
+            DIVS=0
+            SEC_DIVS=0
+          fi
+
+          echo "divergences=$DIVS" >> "$GITHUB_OUTPUT"
+          echo "security_divergences=$SEC_DIVS" >> "$GITHUB_OUTPUT"
+          echo "report_path=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+
+          if [ "$ROGUE_FAIL" = "true" ] && [ "$EXIT_CODE" -ne 0 ]; then
+            echo "::error::rogue-llm found $SEC_DIVS security-relevant divergences across frameworks"
+            exit 1
+          fi
+
+        elif [ "$ROGUE_MODE" = "scan" ]; then
+          if [ -z "$ROGUE_SECRETS" ] || [ -z "$ROGUE_TRANSCRIPT" ]; then
+            echo "::error::scan mode requires secrets-file and transcript inputs"
+            exit 1
+          fi
+          rogue-llm scan "$ROGUE_TRANSCRIPT" --secrets "$ROGUE_SECRETS"
+        fi

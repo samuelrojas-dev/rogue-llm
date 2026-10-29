@@ -1,5 +1,10 @@
 # rogue-llm
 
+[![PyPI version](https://img.shields.io/pypi/v/rogue-llm.svg)](https://pypi.org/project/rogue-llm/)
+[![CI](https://github.com/samuelrojas-dev/rogue-llm/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelrojas-dev/rogue-llm/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Adversarial LLM proxy for testing structural vs behavioral agent security.**
 
 Every existing agent red-teaming tool sends adversarial *prompts* to test your agent. `rogue-llm` does something no other tool does: it **replaces the model itself** with a hostile one that actively tries to exfiltrate your sensitive data.
@@ -137,6 +142,55 @@ rogue-llm diff --list-cases
 | `pydantic-ai` | Pydantic AI (via OpenAI types) | `pip install pydantic-ai` |
 
 Exit code 1 if security-relevant divergences are found — plug it into CI.
+
+### Install with framework adapters
+
+```bash
+pip install rogue-llm[all]          # all adapters
+pip install rogue-llm[openai]      # just OpenAI SDK
+pip install rogue-llm[langchain]   # just LangChain
+```
+
+## GitHub Action
+
+Add structural security testing to your CI pipeline:
+
+```yaml
+# .github/workflows/security.yml
+name: Agent Security
+
+on: [push, pull_request]
+
+jobs:
+  rogue-llm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: samuelrojas-dev/rogue-llm@v1
+        with:
+          frameworks: "openai langchain-core litellm"
+```
+
+The action installs `rogue-llm`, runs differential testing across the specified frameworks, and **fails the build** if security-relevant divergences are found.
+
+### Action inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `mode` | `diff` | `diff` for parser testing, `scan` for transcript scanning |
+| `frameworks` | `openai langchain-core litellm` | Extra frameworks to install |
+| `category` | *(all)* | Filter cases by category |
+| `fail-on-divergence` | `true` | Fail if security divergences found |
+| `secrets-file` | — | Secrets JSON file (scan mode) |
+| `transcript` | — | Transcript file (scan mode) |
+
+### Action outputs
+
+| Output | Description |
+|--------|-------------|
+| `divergences` | Total divergence count |
+| `security-divergences` | Security-relevant divergence count |
+| `report` | Path to JSON report |
 
 ## Endpoints
 
