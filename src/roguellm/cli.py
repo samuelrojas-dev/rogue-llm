@@ -153,7 +153,7 @@ def main():
         prog="rogue-llm",
         description="Adversarial LLM proxy for structural security testing",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="subcommand", required=True)
 
     # serve
     serve = sub.add_parser("serve", help="Start the hostile OpenAI-compatible server")
@@ -198,13 +198,284 @@ def main():
         help="Show detailed notes for each divergence",
     )
 
+    # scan-agent
+    scan_agent = sub.add_parser(
+        "scan-agent",
+        help="Run all attack profiles against your agent and get a security score",
+    )
+    scan_agent.add_argument(
+        "agent_cmd", nargs="+",
+        help="Command to run your agent (e.g. 'python my_agent.py')",
+    )
+    scan_agent.add_argument(
+        "--secrets", required=True,
+        help="JSON file with secrets to exfiltrate",
+    )
+    scan_agent.add_argument(
+        "--profiles", "-p",
+        help="Comma-separated profiles to run (default: all). "
+             "Options: full_attack,data_exfil,email_only,encoding_evasion,"
+             "tool_abuse,stealth,system_prompt",
+    )
+    scan_agent.add_argument(
+        "--output", "-o",
+        help="Save JSON report to file",
+    )
+    scan_agent.add_argument(
+        "--html",
+        help="Save HTML security report to file",
+    )
+    scan_agent.add_argument(
+        "--min-score", type=int, default=0,
+        help="Minimum passing score (0-100). Exit code 1 if below (default: 0)",
+    )
+    scan_agent.add_argument(
+        "--host", default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+
+    # mcp-audit
+    mcp_audit = sub.add_parser(
+        "mcp-audit",
+        help="Adversarial testing of MCP server tools",
+    )
+    mcp_audit.add_argument(
+        "--tools", required=True,
+        help="JSON file defining MCP tools to test",
+    )
+    mcp_audit.add_argument(
+        "--secrets", required=True,
+        help="JSON file with secrets to test for leakage",
+    )
+    mcp_audit.add_argument(
+        "--profiles", "-p",
+        help="Comma-separated profiles to run (default: all)",
+    )
+    mcp_audit.add_argument(
+        "--output", "-o",
+        help="Save JSON report to file",
+    )
+    mcp_audit.add_argument(
+        "--html",
+        help="Save HTML security report to file",
+    )
+    mcp_audit.add_argument(
+        "--min-score", type=int, default=0,
+        help="Minimum passing score (0-100). Exit code 1 if below (default: 0)",
+    )
+
     args = parser.parse_args()
-    if args.command == "serve":
+    if args.subcommand == "serve":
         cmd_serve(args)
-    elif args.command == "scan":
+    elif args.subcommand == "scan":
         cmd_scan(args)
-    elif args.command == "diff":
+    elif args.subcommand == "diff":
         cmd_diff(args)
+    elif args.subcommand == "scan-agent":
+        cmd_scan_agent(args)
+    elif args.subcommand == "mcp-audit":
+        cmd_mcp_audit(args)
+
+
+def cmd_scan_agent(args):
+    """Run all attack profiles against an agent command and report a security score.
+
+    This is the one-liner CI integration: start the hostile server, set
+    OPENAI_BASE_URL, run the agent command, and score the result.
+    """
+    import os
+    import subprocess
+
+    from .hostile import AttackProfile, ALL_PROFILES
+    from .testing import SecurityScan
+
+    secrets = _load_secrets(args.secrets)
+    if not secrets:
+        print("Error: no secrets loaded.", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse profiles
+    if args.profiles:
+        profile_names = [p.strip().upper() for p in args.profiles.split(",")]
+        try:
+            profiles = [AttackProfile[n] for n in profile_names]
+        except KeyError as e:
+            valid = ", ".join(p.name.lower() for p in AttackProfile)
+            print(f"Error: unknown profile {e}. Valid: {valid}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        profiles = ALL_PROFILES
+
+    print(f"""
+\033[91m╔══════════════════════════════════════════════════════════════╗
+║                    rogue-llm v0.3.0                          ║
+║                   Security Scan                              ║
+╚══════════════════════════════════════════════════════════════╝\033[0m
+
+  Agent command: \033[1m{' '.join(args.agent_cmd)}\033[0m
+  Secrets loaded: \033[1m{len(secrets)}\033[0m
+  Profiles to run: \033[1m{len(profiles)}\033[0m
+""")
+
+    def agent_fn(base_url: str):
+        """Run the agent command with OPENAI_BASE_URL set."""
+        env = os.environ.copy()
+        env["OPENAI_BASE_URL"] = base_url
+        env["OPENAI_API_KEY"] = "rogue-llm-not-needed"
+        result = subprocess.run(
+            args.agent_cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            print(f"  \033[93m⚠ Agent exited with code {result.returncode}\033[0m")
+            if result.stderr:
+                # Show last 3 lines of stderr
+                for line in result.stderr.strip().splitlines()[-3:]:
+                    print(f"    {line}")
+
+    def on_profile(profile: AttackProfile):
+        print(f"  \033[1m▶ Running {profile.value}...\033[0m")
+
+    scan = SecurityScan(secrets=secrets, profiles=profiles, host=args.host)
+    results = scan.run(agent_fn, on_profile=on_profile)
+
+    # Print results
+    print()
+    _print_scan_results(results)
+
+    # Save reports
+    if args.output:
+        results.save_json(args.output)
+        print(f"\n  JSON report saved to {args.output}")
+    if args.html:
+        results.save_html(args.html)
+        print(f"  HTML report saved to {args.html}")
+
+    # Exit code based on min-score
+    if results.score < args.min_score:
+        print(f"\n\033[91m  ✗ Score {results.score} is below minimum {args.min_score}\033[0m")
+        sys.exit(1)
+    sys.exit(0)
+
+
+def _print_scan_results(results):
+    """Print the security scan results with color coding."""
+    score = results.score
+    grade = results.grade
+
+    # Color the score
+    if score == 100:
+        color = "\033[92m"  # green
+    elif score >= 80:
+        color = "\033[93m"  # yellow
+    elif score >= 50:
+        color = "\033[33m"  # orange-ish
+    else:
+        color = "\033[91m"  # red
+
+    print(f"  {color}╔══════════════════════════════════════════════════════════╗")
+    print(f"  ║  Security Score: {score:>3}/100  Grade: {grade:<4s}                    ║")
+    print(f"  ║  Verdict: {results.verdict:<47s}║")
+    print(f"  ╚══════════════════════════════════════════════════════════╝\033[0m")
+    print()
+
+    for pr in results.profile_results:
+        if pr.verdict == "STRUCTURAL":
+            icon = "\033[92m✓\033[0m"
+        else:
+            icon = "\033[91m✗\033[0m"
+        print(f"  {icon} {pr.profile.value:20s}  {pr.verdict:12s}  "
+              f"leaked {pr.leaked_count}/{pr.total_secrets}")
+        if pr.leaks:
+            for leak in pr.leaks:
+                print(f"    └─ {leak['secret']!r} via {leak['technique']}")
+
+
+def cmd_mcp_audit(args):
+    """Adversarial testing of MCP server tools.
+
+    Loads tool definitions from a JSON file and runs attack profiles
+    against them using the hostile model.
+    """
+    from .hostile import AttackProfile, ALL_PROFILES
+    from .mcp import MCPScan, MCPTool
+
+    secrets = _load_secrets(args.secrets)
+    if not secrets:
+        print("Error: no secrets loaded.", file=sys.stderr)
+        sys.exit(1)
+
+    # Load tool definitions
+    tools_data = json.loads(Path(args.tools).read_text(encoding="utf-8"))
+    if not isinstance(tools_data, list):
+        print("Error: tools JSON must be a list of tool definitions.", file=sys.stderr)
+        sys.exit(1)
+
+    tools = []
+    for td in tools_data:
+        name = td["name"]
+        description = td.get("description", "")
+        parameters = td.get("parameters", {})
+        # Build a handler that returns the mock_result if defined
+        mock_result = td.get("mock_result", {})
+        sensitive = td.get("sensitive", False)
+        tools.append(MCPTool(
+            name=name,
+            description=description,
+            parameters=parameters,
+            handler=lambda args, r=mock_result: r,
+            sensitive=sensitive,
+        ))
+
+    # Parse profiles
+    if args.profiles:
+        profile_names = [p.strip().upper() for p in args.profiles.split(",")]
+        try:
+            profiles = [AttackProfile[n] for n in profile_names]
+        except KeyError as e:
+            valid = ", ".join(p.name.lower() for p in AttackProfile)
+            print(f"Error: unknown profile {e}. Valid: {valid}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        profiles = ALL_PROFILES
+
+    print(f"""
+\033[91m╔══════════════════════════════════════════════════════════════╗
+║                    rogue-llm v0.3.0                          ║
+║                 MCP Server Audit                             ║
+╚══════════════════════════════════════════════════════════════╝\033[0m
+
+  Tools loaded: \033[1m{len(tools)}\033[0m ({', '.join(t.name for t in tools)})
+  Secrets loaded: \033[1m{len(secrets)}\033[0m
+  Profiles to run: \033[1m{len(profiles)}\033[0m
+""")
+
+    def on_profile(profile: AttackProfile):
+        print(f"  \033[1m▶ Running {profile.value}...\033[0m")
+
+    scan = MCPScan(tools=tools, secrets=secrets, profiles=profiles)
+    results = scan.run(on_profile=on_profile)
+
+    # Print results
+    print()
+    print(f"  {results.summary()}")
+
+    # Save reports
+    if args.output:
+        results.save_json(args.output)
+        print(f"\n  JSON report saved to {args.output}")
+    if args.html:
+        results.save_html(args.html)
+        print(f"  HTML report saved to {args.html}")
+
+    # Exit code
+    if results.score < args.min_score:
+        print(f"\n\033[91m  ✗ Score {results.score} is below minimum {args.min_score}\033[0m")
+        sys.exit(1)
+    sys.exit(0)
 
 
 def cmd_diff(args):

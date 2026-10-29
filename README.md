@@ -80,9 +80,119 @@ def my_agent_function(base_url: str):
     # ... run your agent normally ...
 ```
 
-## Four ways to test your agent
+## MCP Server Adversarial Testing (new in v0.3.0)
 
-### Option 1: Security Scan (comprehensive)
+**No other tool does this.** Test whether your MCP server's tool design leaks sensitive data when the model is hostile:
+
+```python
+from roguellm import MCPScan, MCPTool
+
+tools = [
+    MCPTool(
+        name="get_customer",
+        description="Get customer by ID",
+        parameters={"id": {"type": "string"}},
+        handler=lambda args: {"name": "Acme", "revenue": "2.3M", "notes": "VIP"},
+        sensitive=True,
+    ),
+    MCPTool(
+        name="send_email",
+        description="Send email",
+        parameters={"to": {"type": "string"}, "body": {"type": "string"}},
+        handler=lambda args: {"status": "sent"},
+    ),
+]
+
+scan = MCPScan(tools=tools, secrets=["2.3M", "VIP"])
+results = scan.run()
+print(results.summary())
+# MCP Security Score: 42/100 (F)
+# Overall Verdict: BEHAVIORAL
+```
+
+Or from the CLI with a JSON tool definition file:
+
+```bash
+rogue-llm mcp-audit --tools tools.json --secrets secrets.json --min-score 80
+```
+
+Where `tools.json` defines your MCP tools with mock results:
+
+```json
+[
+  {
+    "name": "get_customer",
+    "description": "Get customer by ID",
+    "parameters": {"id": {"type": "string"}},
+    "mock_result": {"name": "Acme", "revenue": "2.3M", "notes": "VIP"},
+    "sensitive": true
+  },
+  {
+    "name": "send_email",
+    "description": "Send email",
+    "parameters": {"to": {"type": "string"}, "body": {"type": "string"}},
+    "mock_result": {"status": "sent"}
+  }
+]
+```
+
+The `tool_filter` parameter simulates MCP access control — block specific tools to test whether your permissions model is sufficient:
+
+```python
+scan = MCPScan(
+    tools=tools,
+    secrets=["2.3M"],
+    tool_filter=lambda name, args: name != "send_email",  # Block email
+)
+```
+
+## Six ways to test your agent
+
+### Option 1: One-line CLI scan (new in v0.3.0)
+
+The fastest path to a security score — one command, no code:
+
+```bash
+rogue-llm scan-agent python my_agent.py --secrets secrets.json
+```
+
+This starts the hostile server, sets `OPENAI_BASE_URL` for your agent, runs all 7 attack profiles, and prints a scored report:
+
+```
+  ▶ Running full_attack...
+  ▶ Running data_exfil...
+  ▶ Running encoding_evasion...
+  ...
+
+  ╔══════════════════════════════════════════════════════════╗
+  ║  Security Score:  85/100  Grade: B                       ║
+  ║  Verdict: BEHAVIORAL                                     ║
+  ╚══════════════════════════════════════════════════════════╝
+
+  ✓ full_attack            STRUCTURAL    leaked 0/4
+  ✓ data_exfil             STRUCTURAL    leaked 0/4
+  ✗ encoding_evasion       BEHAVIORAL    leaked 2/4
+  ...
+```
+
+Use it in CI with a minimum score gate:
+
+```bash
+# Fail the build if score < 80
+rogue-llm scan-agent python my_agent.py \
+  --secrets secrets.json \
+  --min-score 80 \
+  --html report.html \
+  --output report.json
+```
+
+Options:
+- `--profiles full_attack,stealth` — run specific profiles only
+- `--min-score 80` — exit code 1 if score is below this (CI gate)
+- `--html report.html` — save the visual HTML dashboard
+- `--output report.json` — save machine-readable JSON
+
+### Option 2: Security Scan API (comprehensive)
 
 The scan runs every attack profile against your agent and produces a 0–100 security score with a letter grade:
 
@@ -118,7 +228,7 @@ assert results.verdict == "STRUCTURAL"
 | 50–69 | D | Major vulnerabilities |
 | 0–49 | F | Little to no structural security |
 
-### Option 2: pytest fixture (fastest)
+### Option 3: pytest fixture
 
 The `rogue_server` fixture is available automatically — no imports needed:
 
@@ -130,7 +240,7 @@ def test_agent_structural_security(rogue_server):
     # On teardown, rogue_server asserts STRUCTURAL (no leaks detected)
 ```
 
-### Option 3: Python API
+### Option 4: Python API
 
 ```python
 from roguellm import RogueTest, AttackProfile
@@ -146,7 +256,11 @@ with test.start() as server:
 assert test.verdict == "STRUCTURAL", test.report()
 ```
 
-### Option 4: CLI (serve + point)
+### Option 5: MCP server audit
+
+See [MCP Server Adversarial Testing](#mcp-server-adversarial-testing-new-in-v030) above.
+
+### Option 6: CLI (serve + point)
 
 ```bash
 # Terminal 1: Start the hostile server
@@ -362,7 +476,7 @@ python examples/test_with_api.py
 - **[hackagent](https://pypi.org/project/hackagent/)**, **[probeagent](https://pypi.org/project/probeagent-ai/)**, **[Giskard](https://www.giskard.ai/)**: Send adversarial *prompts* to a normal model. Test behavioral security only.
 - **[LlamaFirewall](https://github.com/meta-llama/llama-firewall)**, **[Pipelock](https://github.com/pipelock-dev/pipelock)**: Add guardrails around the model. Don't test whether the architecture itself is secure.
 - **[agent-audit-kit](https://pypi.org/project/agent-audit-kit/)**: Scans MCP server configurations. Static analysis, not adversarial testing.
-- **rogue-llm**: Replaces the model with a hostile one. Tests whether your *architecture* prevents leaks, regardless of model behavior. 7 attack profiles, streaming support, security scoring, HTML reports.
+- **rogue-llm**: Replaces the model with a hostile one. Tests whether your *architecture* prevents leaks, regardless of model behavior. 7 attack profiles, MCP server adversarial testing, streaming support, security scoring, HTML reports.
 
 ## Related research
 

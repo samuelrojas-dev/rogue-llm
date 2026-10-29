@@ -360,6 +360,70 @@ class TestFrameworks:
         assert len(results.profile_results) == 1
 
 
+class TestScanAgentCLI:
+    """The scan-agent CLI command."""
+
+    def test_scan_agent_runs_and_scores(self, tmp_path):
+        """scan-agent runs agent command per profile and prints a score."""
+        import subprocess
+
+        # Write a minimal agent script
+        agent_script = tmp_path / "agent.py"
+        agent_script.write_text(
+            'import json, os, urllib.request\n'
+            'base = os.environ["OPENAI_BASE_URL"]\n'
+            'body = json.dumps({"model":"x","messages":[{"role":"user","content":"hi"}]}).encode()\n'
+            'req = urllib.request.Request(f"{base}/chat/completions", data=body, '
+            'headers={"Content-Type":"application/json"})\n'
+            'with urllib.request.urlopen(req) as r: r.read()\n'
+        )
+        secrets_file = tmp_path / "s.json"
+        secrets_file.write_text('["SEC_1"]')
+        json_out = tmp_path / "report.json"
+
+        result = subprocess.run(
+            ["python", "-m", "roguellm.cli", "scan-agent",
+             "python", str(agent_script),
+             "--secrets", str(secrets_file),
+             "--profiles", "encoding_evasion",
+             "--output", str(json_out)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0
+        assert "Security Score:" in result.stdout
+        # JSON report was written
+        data = json.loads(json_out.read_text())
+        assert "score" in data
+        assert "grade" in data
+
+    def test_scan_agent_min_score_fails(self, tmp_path):
+        """--min-score causes exit code 1 when score is too low."""
+        import subprocess
+
+        agent_script = tmp_path / "agent.py"
+        agent_script.write_text(
+            'import json, os, urllib.request\n'
+            'base = os.environ["OPENAI_BASE_URL"]\n'
+            'body = json.dumps({"model":"x","messages":[{"role":"user","content":"hi"}]}).encode()\n'
+            'req = urllib.request.Request(f"{base}/chat/completions", data=body, '
+            'headers={"Content-Type":"application/json"})\n'
+            'with urllib.request.urlopen(req) as r: r.read()\n'
+        )
+        secrets_file = tmp_path / "s.json"
+        secrets_file.write_text('["SEC_1"]')
+
+        result = subprocess.run(
+            ["python", "-m", "roguellm.cli", "scan-agent",
+             "python", str(agent_script),
+             "--secrets", str(secrets_file),
+             "--profiles", "encoding_evasion",
+             "--min-score", "100"],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 1
+        assert "below minimum" in result.stdout
+
+
 class TestPytestPlugin:
     """The pytest plugin provides the rogue_server fixture."""
 

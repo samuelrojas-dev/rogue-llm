@@ -31,6 +31,7 @@ from .hostile import HostileModel, AttackProfile, ALL_PROFILES
 from .detector import find_leaks, Leak
 from .server import create_server, RogueServer, SessionLog
 from .testing import RogueTest, SecurityScan, ScanResults
+from .mcp import MCPTool, MCPScan, MCPScanResults
 
 __all__ = [
     "HostileModel",
@@ -44,5 +45,8 @@ __all__ = [
     "RogueTest",
     "SecurityScan",
     "ScanResults",
+    "MCPTool",
+    "MCPScan",
+    "MCPScanResults",
     "__version__",
 ]
