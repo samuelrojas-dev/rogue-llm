@@ -3,7 +3,7 @@
 Commands:
     rogue-llm serve   — Start the hostile OpenAI-compatible server
     rogue-llm scan    — Scan a transcript/log file for leaked secrets
-    rogue-llm report  — Generate a structural-vs-behavioral report
+    rogue-llm diff    — Differential testing of tool-call parsers across frameworks
 """
 
 import argparse
@@ -167,11 +167,123 @@ def main():
     scan.add_argument("file", help="Text file to scan")
     scan.add_argument("--secrets", required=True, help="JSON file with secrets")
 
+    # diff
+    diff = sub.add_parser("diff", help="Differential testing of tool-call parsers")
+    diff.add_argument(
+        "--adapters", "-a",
+        help="Comma-separated adapter names (default: all available)",
+    )
+    diff.add_argument(
+        "--category", "-c",
+        help="Filter cases by category",
+    )
+    diff.add_argument(
+        "--list-adapters", action="store_true",
+        help="List available adapters and exit",
+    )
+    diff.add_argument(
+        "--list-cases", action="store_true",
+        help="List all test cases and exit",
+    )
+    diff.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Output report as JSON",
+    )
+    diff.add_argument(
+        "--output", "-o",
+        help="Save report to file",
+    )
+    diff.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show detailed notes for each divergence",
+    )
+
     args = parser.parse_args()
     if args.command == "serve":
         cmd_serve(args)
     elif args.command == "scan":
         cmd_scan(args)
+    elif args.command == "diff":
+        cmd_diff(args)
+
+
+def cmd_diff(args):
+    """Run differential testing of tool-call parsers."""
+    from roguellm.adapters import get_available, get_adapter
+    from roguellm.cases import ALL_CASES, CATEGORIES, get_cases
+    from roguellm.diff import run_diff, format_report
+
+    # List adapters
+    if args.list_adapters:
+        from roguellm.adapters.registry import ALL_ADAPTERS
+        print("Available adapters:\n")
+        for cls in ALL_ADAPTERS:
+            adapter = cls()
+            status = "\033[92m✓\033[0m" if adapter.available() else "\033[91m✗\033[0m"
+            print(f"  {status} {adapter.name:20s}  {adapter.version}")
+        print(f"\nInstall a framework to enable its adapter.")
+        return
+
+    # List cases
+    if args.list_cases:
+        cases = get_cases(args.category)
+        print(f"Test cases ({len(cases)}):\n")
+        for case in cases:
+            print(f"  [{case.category}] {case.id}")
+            print(f"    {case.title}")
+            if case.cve_refs:
+                print(f"    Refs: {', '.join(case.cve_refs)}")
+            print()
+        print(f"Categories: {', '.join(CATEGORIES)}")
+        return
+
+    # Get adapters
+    if args.adapters:
+        adapter_names = [n.strip() for n in args.adapters.split(",")]
+        adapters = []
+        for name in adapter_names:
+            a = get_adapter(name)
+            if a is None:
+                print(f"Error: adapter '{name}' not available", file=sys.stderr)
+                sys.exit(1)
+            adapters.append(a)
+    else:
+        adapters = get_available()
+
+    if len(adapters) < 2:
+        print(
+            "Need at least 2 adapters for differential testing.\n"
+            "Install frameworks: pip install openai langchain-core litellm\n\n"
+            "Available adapters:",
+            file=sys.stderr,
+        )
+        for a in adapters:
+            print(f"  ✓ {a.name}", file=sys.stderr)
+        print(f"\nUse --list-adapters to see all.", file=sys.stderr)
+        sys.exit(1)
+
+    # Run
+    print(f"\n\033[1mRunning {len(get_cases(args.category))} cases across "
+          f"{len(adapters)} adapters...\033[0m\n")
+
+    report = run_diff(adapters, category=args.category)
+
+    if args.json_output:
+        output = json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+        if args.output:
+            Path(args.output).write_text(output)
+            print(f"Report saved to {args.output}")
+        else:
+            print(output)
+    else:
+        text = format_report(report, verbose=args.verbose)
+        print(text)
+        if args.output:
+            Path(args.output).write_text(text)
+            print(f"Report saved to {args.output}")
+
+    # Exit code: 1 if security-relevant divergences found
+    sys.exit(1 if report.security_divergences > 0 else 0)
 
 
 if __name__ == "__main__":
