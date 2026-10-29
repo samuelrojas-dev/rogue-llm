@@ -24,21 +24,20 @@ class PydanticAIAdapter(Adapter):
     @property
     def version(self) -> str:
         try:
-            import pydantic_ai
-            return getattr(pydantic_ai, "__version__", "unknown")
-        except ImportError:
+            from importlib.metadata import version
+            return version("pydantic-ai")
+        except Exception:
             return "not installed"
 
     def parse(self, raw_json: str) -> ParseResult:
         # Pydantic-AI uses the openai SDK under the hood for OpenAI models.
-        # We test its specific response conversion path.
+        # We test its response conversion path via ChatCompletion validation.
         try:
-            from pydantic_ai.models.openai import OpenAIModel  # noqa: F401
             from openai.types.chat import ChatCompletion
         except ImportError:
             return ParseResult(
                 adapter=self.name, calls=[],
-                error="pydantic-ai or openai not installed",
+                error="openai not installed",
             )
 
         try:
